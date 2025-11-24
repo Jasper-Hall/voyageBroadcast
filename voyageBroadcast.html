@@ -285,6 +285,11 @@
                 if (!hasBluetooth) msg += "• Browser does not support Web Bluetooth (Try Chrome/Edge/Bluefy).<br>";
                 if (!isSecure) msg += "• Connection is not secure (Must use HTTPS or Localhost).<br>";
                 browserError.innerHTML = msg;
+            } else {
+                // Browser supports it, but button visibility will be controlled by host status
+                // Initially hide until we know if a host is active
+                connectBtn.style.display = 'none';
+                browserError.style.display = 'none';
             }
         }
         checkSystemRequirements();
@@ -294,6 +299,7 @@
         const CHAR_UUID    = "44444444-4444-4444-4444-444444444444";
         const MQTT_BROKER  = "wss://broker.emqx.io:8084/mqtt";
         const MQTT_TOPIC   = "feather-sense/motion/v1";
+        const MQTT_STATUS_TOPIC = "feather-sense/motion/v1/status";
 
         // --- UI Elements ---
         const statusBadge = document.getElementById('statusBadge');
@@ -409,6 +415,9 @@
         // --- Logic & State ---
         let mqttClient;
         let isHost = false;
+        let hostActive = false;
+        let dataTimeout = null;
+        const DATA_TIMEOUT_MS = 5000; // 5 seconds without data = host offline
 
         // 1. MQTT Connection (Viewer Mode)
         mqttClient = mqtt.connect(MQTT_BROKER);
@@ -416,14 +425,84 @@
             mqttBadge.innerText = "CLOUD: ONLINE";
             mqttBadge.classList.add('active');
             if (!isHost) {
+                // Subscribe to both data and status topics
                 mqttClient.subscribe(MQTT_TOPIC);
+                mqttClient.subscribe(MQTT_STATUS_TOPIC, (err) => {
+                    if (!err) {
+                        // After subscribing, check for retained status message
+                        // The broker will send the last retained message if one exists
+                        // This happens automatically, but we can also request it
+                        setTimeout(() => {
+                            // If no status received after 1 second, assume no host
+                            if (!hostActive) {
+                                updateConnectButtonVisibility();
+                            }
+                        }, 1000);
+                    }
+                });
                 roleBadge.innerText = "VIEWER MODE";
             }
         });
         
         mqttClient.on('message', (topic, msg) => {
-            if (!isHost) processData(JSON.parse(msg.toString()));
+            if (isHost) return; // Host doesn't process incoming messages
+            
+            if (topic === MQTT_STATUS_TOPIC) {
+                // Handle host status updates
+                try {
+                    const status = JSON.parse(msg.toString());
+                    if (status.type === 'host_online') {
+                        hostActive = true;
+                        updateConnectButtonVisibility();
+                    } else if (status.type === 'host_offline') {
+                        hostActive = false;
+                        updateConnectButtonVisibility();
+                    }
+                } catch (e) {
+                    console.error('Error parsing status message:', e);
+                }
+            } else if (topic === MQTT_TOPIC) {
+                // Process sensor data
+                processData(JSON.parse(msg.toString()));
+                
+                // Reset timeout - host is active
+                if (!hostActive) {
+                    hostActive = true;
+                    updateConnectButtonVisibility();
+                }
+                
+                // Clear existing timeout
+                if (dataTimeout) clearTimeout(dataTimeout);
+                
+                // Set new timeout - if no data for 5 seconds, assume host offline
+                dataTimeout = setTimeout(() => {
+                    hostActive = false;
+                    updateConnectButtonVisibility();
+                }, DATA_TIMEOUT_MS);
+            }
         });
+        
+        // Function to show/hide connect button based on host status
+        function updateConnectButtonVisibility() {
+            if (isHost) {
+                // Host always hides the button (it's already disabled)
+                return;
+            }
+            
+            if (hostActive) {
+                // Host is active, hide button for viewers
+                connectBtn.style.display = 'none';
+                if (browserError) browserError.style.display = 'none';
+            } else {
+                // No host active, show button if browser supports it
+                const isSecure = window.isSecureContext;
+                const hasBluetooth = navigator.bluetooth !== undefined;
+                if (hasBluetooth && isSecure) {
+                    connectBtn.style.display = 'flex';
+                    if (browserError) browserError.style.display = 'none';
+                }
+            }
+        }
 
         // 2. Bluetooth Connection (Host Mode)
         connectBtn.addEventListener('click', async () => {
@@ -459,9 +538,25 @@
                 statusBadge.classList.add('active');
                 roleBadge.innerText = "HOST MODE";
                 roleBadge.classList.add('host');
-                if(mqttClient) mqttClient.unsubscribe(MQTT_TOPIC);
+                if(mqttClient) {
+                    mqttClient.unsubscribe(MQTT_TOPIC);
+                    mqttClient.unsubscribe(MQTT_STATUS_TOPIC);
+                    
+                    // Announce host is online
+                    mqttClient.publish(MQTT_STATUS_TOPIC, JSON.stringify({ 
+                        type: 'host_online',
+                        timestamp: Date.now()
+                    }), { qos: 1, retain: true });
+                }
 
                 device.addEventListener('gattserverdisconnected', () => {
+                    // Announce host is offline before reloading
+                    if(mqttClient && mqttClient.connected) {
+                        mqttClient.publish(MQTT_STATUS_TOPIC, JSON.stringify({ 
+                            type: 'host_offline',
+                            timestamp: Date.now()
+                        }), { qos: 1, retain: true });
+                    }
                     alert("Device Disconnected");
                     location.reload();
                 });
