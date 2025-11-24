@@ -278,18 +278,13 @@
             const hasBluetooth = navigator.bluetooth !== undefined;
 
             if (!hasBluetooth || !isSecure) {
-                if (connectBtn) connectBtn.style.display = 'none'; // Hide button
-                if (browserError) {
-                    browserError.style.display = 'block'; // Show Error
-                    let msg = "⚠️ <b>SYSTEM ERROR:</b><br>";
-                    if (!hasBluetooth) msg += "• Browser does not support Web Bluetooth (Try Chrome/Edge/Bluefy).<br>";
-                    if (!isSecure) msg += "• Connection is not secure (Must use HTTPS or Localhost).<br>";
-                    browserError.innerHTML = msg;
-                }
-            } else {
-                // Ensure button is visible if requirements are met
-                if (connectBtn) connectBtn.style.display = 'flex';
-                if (browserError) browserError.style.display = 'none';
+                connectBtn.style.display = 'none'; // Hide button
+                browserError.style.display = 'block'; // Show Error
+                
+                let msg = "⚠️ <b>SYSTEM ERROR:</b><br>";
+                if (!hasBluetooth) msg += "• Browser does not support Web Bluetooth (Try Chrome/Edge/Bluefy).<br>";
+                if (!isSecure) msg += "• Connection is not secure (Must use HTTPS or Localhost).<br>";
+                browserError.innerHTML = msg;
             }
         }
         checkSystemRequirements();
@@ -297,8 +292,7 @@
         // --- Configuration ---
         const SERVICE_UUID = "33333333-3333-3333-3333-333333333333";
         const CHAR_UUID    = "44444444-4444-4444-4444-444444444444";
-        // MQTT Broker - Required for broadcasting
-        const MQTT_BROKER  = "wss://broker.hivemq.com:8000/mqtt";
+        const MQTT_BROKER  = "wss://broker.emqx.io:8084/mqtt";
         const MQTT_TOPIC   = "feather-sense/motion/v1";
 
         // --- UI Elements ---
@@ -354,7 +348,8 @@
         // --- Logic & State (Declared before animate function) ---
         let targetPitch = 0, targetRoll = 0, targetYaw = 0;
         let filterPitch = 0, filterRoll = 0;
-        const dt = 0.05, alpha = 0.95;
+        const dt = 0.05;
+        const alpha = 0.98; // Increased slightly for smoother head tracking
 
         function animate() {
             requestAnimationFrame(animate);
@@ -414,99 +409,21 @@
         // --- Logic & State ---
         let mqttClient;
         let isHost = false;
-        let mqttRetryCount = 0;
-        const MAX_MQTT_RETRIES = 5;
 
-        // 1. MQTT Connection (Required for Broadcasting)
-        function connectMQTT() {
-            try {
-                mqttBadge.innerText = "CLOUD: CONNECTING...";
-                mqttBadge.classList.remove('active');
-                
-                mqttClient = mqtt.connect(MQTT_BROKER, {
-                    reconnectPeriod: 5000,
-                    connectTimeout: 10000,
-                    clientId: 'voyage-' + Math.random().toString(16).substr(2, 8)
-                });
-
-                mqttClient.on('connect', () => {
-                    mqttRetryCount = 0;
-                    mqttBadge.innerText = "CLOUD: ONLINE";
-                    mqttBadge.classList.add('active');
-                    console.log('MQTT Connected successfully');
-                    
-                    if (!isHost) {
-                        mqttClient.subscribe(MQTT_TOPIC, (err) => {
-                            if (err) {
-                                console.error('MQTT Subscribe error:', err);
-                            } else {
-                                console.log('Subscribed to', MQTT_TOPIC);
-                                roleBadge.innerText = "VIEWER MODE";
-                            }
-                        });
-                    }
-                });
-
-                mqttClient.on('message', (topic, msg) => {
-                    try {
-                        if (!isHost) processData(JSON.parse(msg.toString()));
-                    } catch (e) {
-                        console.error('Error parsing MQTT message:', e);
-                    }
-                });
-
-                mqttClient.on('error', (error) => {
-                    console.error('MQTT Error:', error);
-                    mqttBadge.innerText = "CLOUD: ERROR";
-                    mqttBadge.classList.remove('active');
-                    
-                    // Retry connection
-                    if (mqttRetryCount < MAX_MQTT_RETRIES) {
-                        mqttRetryCount++;
-                        console.log(`MQTT Retry attempt ${mqttRetryCount}/${MAX_MQTT_RETRIES}`);
-                        setTimeout(() => {
-                            if (mqttClient) {
-                                mqttClient.end();
-                            }
-                            connectMQTT();
-                        }, 3000 * mqttRetryCount); // Exponential backoff
-                    } else {
-                        mqttBadge.innerText = "CLOUD: FAILED";
-                        console.error('MQTT connection failed after', MAX_MQTT_RETRIES, 'attempts');
-                    }
-                });
-
-                mqttClient.on('close', () => {
-                    console.log('MQTT Connection closed');
-                    mqttBadge.innerText = "CLOUD: OFFLINE";
-                    mqttBadge.classList.remove('active');
-                    
-                    // Auto-reconnect if not manually closed
-                    if (!isHost && mqttRetryCount < MAX_MQTT_RETRIES) {
-                        setTimeout(connectMQTT, 2000);
-                    }
-                });
-
-                mqttClient.on('offline', () => {
-                    console.log('MQTT Client offline');
-                    mqttBadge.innerText = "CLOUD: OFFLINE";
-                    mqttBadge.classList.remove('active');
-                });
-
-            } catch (error) {
-                console.error('MQTT Connection error:', error);
-                mqttBadge.innerText = "CLOUD: ERROR";
-                mqttBadge.classList.remove('active');
-                
-                if (mqttRetryCount < MAX_MQTT_RETRIES) {
-                    mqttRetryCount++;
-                    setTimeout(connectMQTT, 3000 * mqttRetryCount);
-                }
+        // 1. MQTT Connection (Viewer Mode)
+        mqttClient = mqtt.connect(MQTT_BROKER);
+        mqttClient.on('connect', () => {
+            mqttBadge.innerText = "CLOUD: ONLINE";
+            mqttBadge.classList.add('active');
+            if (!isHost) {
+                mqttClient.subscribe(MQTT_TOPIC);
+                roleBadge.innerText = "VIEWER MODE";
             }
-        }
-
-        // Initialize MQTT connection
-        connectMQTT();
+        });
+        
+        mqttClient.on('message', (topic, msg) => {
+            if (!isHost) processData(JSON.parse(msg.toString()));
+        });
 
         // 2. Bluetooth Connection (Host Mode)
         connectBtn.addEventListener('click', async () => {
@@ -529,22 +446,8 @@
                 characteristic.addEventListener('characteristicvaluechanged', (e) => {
                     const dataObj = parseBLE(e.target.value);
                     processData(dataObj);
-                    // Broadcast to MQTT (required)
-                    if (mqttClient && mqttClient.connected) {
-                        try {
-                            mqttClient.publish(MQTT_TOPIC, JSON.stringify(dataObj), { qos: 0 }, (err) => {
-                                if (err) {
-                                    console.error('MQTT Publish error:', err);
-                                    mqttBadge.innerText = "CLOUD: PUB ERROR";
-                                }
-                            });
-                        } catch (err) {
-                            console.error('MQTT Publish exception:', err);
-                        }
-                    } else {
-                        console.warn('MQTT not connected, data not broadcasted');
-                        mqttBadge.innerText = "CLOUD: NOT CONNECTED";
-                    }
+                    // Broadcast
+                    if(mqttClient.connected) mqttClient.publish(MQTT_TOPIC, JSON.stringify(dataObj));
                 });
 
                 // UI Update
@@ -556,11 +459,7 @@
                 statusBadge.classList.add('active');
                 roleBadge.innerText = "HOST MODE";
                 roleBadge.classList.add('host');
-                // Unsubscribe from viewer mode, but keep connection for broadcasting
-                if(mqttClient && mqttClient.connected) {
-                    mqttClient.unsubscribe(MQTT_TOPIC);
-                    console.log('Unsubscribed from viewer mode, ready to broadcast');
-                }
+                if(mqttClient) mqttClient.unsubscribe(MQTT_TOPIC);
 
                 device.addEventListener('gattserverdisconnected', () => {
                     alert("Device Disconnected");
@@ -578,8 +477,18 @@
             const pressure = value.getFloat32(0, true);
             const hr = value.getUint8(4, true);
             const spo2 = value.getUint8(5, true);
-            const ax = value.getInt8(6)/8.0, ay = value.getInt8(7)/8.0, az = value.getInt8(8)/8.0;
-            const gx = value.getInt8(9)/2.0, gy = value.getInt8(10)/2.0, gz = value.getInt8(11)/2.0;
+            
+            // Decompression Logic:
+            // Firmware multiplies by 10 to fit float into int8. We divide by 10 to restore.
+            const ax = value.getInt8(6) / 10.0;
+            const ay = value.getInt8(7) / 10.0;
+            const az = value.getInt8(8) / 10.0;
+            
+            // Gyro: Firmware sends Rad/s * 10. We divide by 10 to get Radians/s.
+            const gx = value.getInt8(9) / 10.0;
+            const gy = value.getInt8(10) / 10.0;
+            const gz = value.getInt8(11) / 10.0;
+            
             return { pressure, hr, spo2, ax, ay, az, gx, gy, gz };
         }
 
@@ -591,14 +500,15 @@
             const accPitch = Math.atan2(d.ay, d.az);
             const accRoll = Math.atan2(-d.ax, Math.sqrt(d.ay*d.ay + d.az*d.az));
             
-            filterPitch = alpha * (filterPitch + d.gy * (Math.PI/180) * dt) + (1-alpha) * accPitch;
-            filterRoll = alpha * (filterRoll + d.gx * (Math.PI/180) * dt) + (1-alpha) * accRoll;
+            // Integration (Gyro is already in Rad/s from parseBLE)
+            filterPitch = alpha * (filterPitch + d.gy * dt) + (1-alpha) * accPitch;
+            filterRoll = alpha * (filterRoll + d.gx * dt) + (1-alpha) * accRoll;
             
             targetPitch = filterPitch;
             targetRoll = filterRoll;
-            targetYaw += d.gz * (Math.PI/180) * dt;
+            targetYaw += d.gz * dt;
 
-            // Update DOM Stats
+            // Update DOM Stats (Convert Radians to Degrees for display)
             document.getElementById('pitchVal').innerText = (filterPitch * (180/Math.PI)).toFixed(1);
             document.getElementById('rollVal').innerText = (filterRoll * (180/Math.PI)).toFixed(1);
             const g = Math.sqrt(d.ax**2 + d.ay**2 + d.az**2) / 9.8;
