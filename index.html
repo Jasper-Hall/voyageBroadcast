@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeuroMotion Monitor | Feather Sense</title>
+    
+    <!-- Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #050a10;
+            --panel-bg: #0f1724;
+            --text-main: #e0f2f1;
+            --text-dim: #8da6b5;
+            --accent-cyan: #00f2ff;
+            --accent-green: #00ff9d;
+            --accent-alert: #ff2a6d;
+            --grid-line: #1f2d3d;
+            --font-ui: 'Segoe UI', Roboto, Helvetica, sans-serif;
+            --font-mono: 'Courier New', monospace;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: var(--font-ui);
+            margin: 0;
+            padding: 20px;
+            overflow-x: hidden;
+        }
+
+        /* HEADER & CONTROLS */
+        .hud-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid var(--accent-cyan);
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+
+        .hud-title h1 { margin: 0; font-size: 24px; text-transform: uppercase; letter-spacing: 2px; }
+        .hud-title span { font-size: 12px; color: var(--text-dim); }
+
+        /* The Control Area - NOW HIGHLY VISIBLE */
+        .control-bar {
+            background: rgba(0, 242, 255, 0.05);
+            border: 1px solid var(--grid-line);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        /* The Big Connect Button */
+        #connectBtn {
+            background-color: var(--accent-cyan);
+            color: #000;
+            border: none;
+            padding: 12px 25px;
+            font-size: 16px;
+            font-weight: bold;
+            text-transform: uppercase;
+            border-radius: 4px;
+            cursor: pointer;
+            box-shadow: 0 0 15px rgba(0, 242, 255, 0.4);
+            transition: all 0.2s;
+            display: flex; /* Hidden by default if not supported */
+            align-items: center;
+            gap: 10px;
+        }
+
+        #connectBtn:hover {
+            transform: scale(1.02);
+            box-shadow: 0 0 25px rgba(0, 242, 255, 0.6);
+            background-color: #fff;
+        }
+
+        #connectBtn:disabled {
+            background-color: #333;
+            color: #777;
+            box-shadow: none;
+            cursor: not-allowed;
+        }
+
+        /* Error Messages */
+        #browserError {
+            display: none;
+            color: var(--accent-alert);
+            font-weight: bold;
+            background: rgba(255, 42, 109, 0.1);
+            padding: 10px;
+            border: 1px solid var(--accent-alert);
+            border-radius: 4px;
+            width: 100%;
+        }
+
+        .status-indicators {
+            display: flex;
+            gap: 15px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+        }
+        
+        .badge {
+            padding: 5px 10px;
+            border-radius: 4px;
+            background: #111;
+            border: 1px solid #333;
+            color: #888;
+        }
+
+        .badge.active {
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+            background: rgba(0, 255, 157, 0.1);
+        }
+
+        .badge.host {
+            border-color: var(--accent-cyan);
+            color: var(--accent-cyan);
+            background: rgba(0, 242, 255, 0.1);
+        }
+
+        /* DASHBOARD GRID */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            /* Height constraint for desktop to fit mostly in view */
+            height: calc(100vh - 160px); 
+        }
+
+        .panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--grid-line);
+            border-radius: 6px;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .panel h3 {
+            margin: 0 0 10px 0;
+            font-size: 12px;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-left: 3px solid var(--accent-cyan);
+            padding-left: 8px;
+        }
+
+        .viz-3d-panel {
+            grid-column: 1 / 2;
+            grid-row: 1 / 3; /* Tall panel on left */
+        }
+
+        #canvas-container {
+            flex-grow: 1;
+            width: 100%;
+            background: radial-gradient(circle at center, #1b283b 0%, #050a10 100%);
+            border-radius: 4px;
+            position: relative;
+        }
+
+        .overlay-stats {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--accent-cyan);
+            background: rgba(0,0,0,0.5);
+            padding: 5px;
+            border-radius: 4px;
+            pointer-events: none;
+        }
+
+        canvas { width: 100% !important; height: 100% !important; }
+        .chart-container { flex-grow: 1; position: relative; min-height: 0; }
+
+        /* Responsive Mobile */
+        @media (max-width: 900px) {
+            .dashboard-grid { display: flex; flex-direction: column; height: auto; }
+            .viz-3d-panel { height: 400px; }
+            .panel { height: 250px; }
+            .control-bar { flex-direction: column; align-items: stretch; }
+            #connectBtn { width: 100%; justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header -->
+    <div class="hud-header">
+        <div class="hud-title">
+            <h1>NeuroMotion</h1>
+            <span>VESTIBULAR TELEMETRY SYSTEM // V1.0</span>
+        </div>
+    </div>
+
+    <!-- Smart Control Bar -->
+    <div class="control-bar">
+        
+        <!-- Error Message Container (Hidden by default) -->
+        <div id="browserError">
+            ⚠️ BLUETOOTH NOT AVAILABLE. <br>
+            Please use <b>Chrome</b>, <b>Edge</b>, or <b>Bluefy (iOS)</b>.<br>
+            Ensure this site is served via <b>HTTPS</b> or <b>localhost</b>.
+        </div>
+
+        <!-- The Main Interaction Button -->
+        <button id="connectBtn">
+            <span style="font-size: 1.2em">📡</span> CONNECT DEVICE (HOST)
+        </button>
+
+        <!-- Status Indicators -->
+        <div class="status-indicators">
+            <div id="statusBadge" class="badge">DISCONNECTED</div>
+            <div id="roleBadge" class="badge">VIEWER MODE</div>
+            <div id="mqttBadge" class="badge">CLOUD: OFFLINE</div>
+        </div>
+    </div>
+
+    <!-- Dashboard Content -->
+    <div class="dashboard-grid">
+        
+        <!-- 3D Head Visualization -->
+        <div class="panel viz-3d-panel">
+            <h3>Subject Orientation (Real-time)</h3>
+            <div id="canvas-container">
+                <div class="overlay-stats">
+                    PITCH: <span id="pitchVal">0.0</span>°<br>
+                    ROLL:  <span id="rollVal">0.0</span>°<br>
+                    G-FORCE: <span id="gForceVal">0.0</span> G
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="panel">
+            <h3>Bio-Metrics (HR / SPO2)</h3>
+            <div class="chart-container"><canvas id="bioChart"></canvas></div>
+        </div>
+
+        <div class="panel">
+            <h3>Inner Ear Pressure (Pa)</h3>
+            <div class="chart-container"><canvas id="pressureChart"></canvas></div>
+        </div>
+
+        <div class="panel">
+            <h3>Linear Acceleration (m/s²)</h3>
+            <div class="chart-container"><canvas id="accelChart"></canvas></div>
+        </div>
+
+        <div class="panel">
+            <h3>Rotational Velocity (deg/s)</h3>
+            <div class="chart-container"><canvas id="gyroChart"></canvas></div>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. SYSTEM CHECK (Why isn't the button working?) ---
+        const connectBtn = document.getElementById('connectBtn');
+        const browserError = document.getElementById('browserError');
+
+        function checkSystemRequirements() {
+            const isSecure = window.isSecureContext; // HTTPS or Localhost
+            const hasBluetooth = navigator.bluetooth !== undefined;
+
+            if (!hasBluetooth || !isSecure) {
+                connectBtn.style.display = 'none'; // Hide button
+                browserError.style.display = 'block'; // Show Error
+                
+                let msg = "⚠️ <b>SYSTEM ERROR:</b><br>";
+                if (!hasBluetooth) msg += "• Browser does not support Web Bluetooth (Try Chrome/Edge/Bluefy).<br>";
+                if (!isSecure) msg += "• Connection is not secure (Must use HTTPS or Localhost).<br>";
+                browserError.innerHTML = msg;
+            }
+        }
+        checkSystemRequirements();
+
+        // --- Configuration ---
+        const SERVICE_UUID = "33333333-3333-3333-3333-333333333333";
+        const CHAR_UUID    = "44444444-4444-4444-4444-444444444444";
+        const MQTT_BROKER  = "wss://broker.hivemq.com:8000/mqtt";
+        const MQTT_TOPIC   = "feather-sense/motion/v1";
+
+        // --- UI Elements ---
+        const statusBadge = document.getElementById('statusBadge');
+        const roleBadge = document.getElementById('roleBadge');
+        const mqttBadge = document.getElementById('mqttBadge');
+
+        // --- 3D Scene Setup (Three.js) ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(45, container.offsetWidth / container.offsetHeight, 0.1, 100);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(container.offsetWidth, container.offsetHeight);
+        container.appendChild(renderer.domElement);
+
+        // Lights
+        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+        const dirLight = new THREE.DirectionalLight(0x00f2ff, 1);
+        dirLight.position.set(5, 5, 5);
+        scene.add(dirLight);
+
+        // Medical Head Object
+        const headGroup = new THREE.Group();
+        
+        // Skull
+        const skullGeo = new THREE.IcosahedronGeometry(1.2, 1);
+        const skullMat = new THREE.MeshPhongMaterial({ 
+            color: 0x0f1724, emissive: 0x050a10, shininess: 100, flatShading: true 
+        });
+        const skullWire = new THREE.MeshBasicMaterial({ color: 0x00f2ff, wireframe: true, transparent: true, opacity: 0.15 });
+        const skull = new THREE.Mesh(skullGeo, skullMat);
+        headGroup.add(skull);
+        headGroup.add(new THREE.Mesh(skullGeo, skullWire));
+
+        // Visor (Front)
+        const visorGeo = new THREE.BoxGeometry(1.4, 0.4, 0.5);
+        const visorMat = new THREE.MeshPhongMaterial({ color: 0x000000, speculer: 0xffffff });
+        const visor = new THREE.Mesh(visorGeo, visorMat);
+        visor.position.set(0, 0.1, 1);
+        headGroup.add(visor);
+
+        // Ear Pieces (Sides)
+        const earGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.2, 16);
+        const earMat = new THREE.MeshBasicMaterial({ color: 0x00f2ff });
+        const earL = new THREE.Mesh(earGeo, earMat); earL.rotation.z = Math.PI/2; earL.position.set(-1.2, 0, 0);
+        const earR = new THREE.Mesh(earGeo, earMat); earR.rotation.z = Math.PI/2; earR.position.set(1.2, 0, 0);
+        headGroup.add(earL);
+        headGroup.add(earR);
+
+        scene.add(headGroup);
+        camera.position.z = 6;
+
+        function animate() {
+            requestAnimationFrame(animate);
+            // Smooth LERP to target
+            headGroup.rotation.x += (targetPitch - headGroup.rotation.x) * 0.1;
+            headGroup.rotation.z += (targetRoll - headGroup.rotation.z) * 0.1;
+            headGroup.rotation.y += (targetYaw - headGroup.rotation.y) * 0.1;
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // Handle Window Resize
+        window.addEventListener('resize', () => {
+            const w = container.offsetWidth;
+            const h = container.offsetHeight;
+            renderer.setSize(w, h);
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+        });
+
+        // --- Chart Config ---
+        Chart.defaults.color = '#556';
+        Chart.defaults.borderColor = '#1f2d3d';
+        const MAX_POINTS = 50;
+
+        function initChart(id, label, color, min, max) {
+            return new Chart(document.getElementById(id).getContext('2d'), {
+                type: 'line',
+                data: { labels: [], datasets: [{ 
+                    label: label, data: [], borderColor: color, backgroundColor: color+'10',
+                    borderWidth: 2, tension: 0.3, pointRadius: 0, fill: true
+                }]},
+                options: {
+                    responsive: true, maintainAspectRatio: false, animation: false,
+                    scales: { 
+                        x: { display: false }, 
+                        y: { suggestedMin: min, suggestedMax: max, grid: { color: '#1f2d3d' } } 
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        const charts = {
+            bio: initChart('bioChart', 'Heart Rate', '#ff2a6d', 50, 150),
+            pressure: initChart('pressureChart', 'Pa', '#e0f2f1', 98000, 103000),
+            accel: initChart('accelChart', 'X', '#00f2ff', -10, 10),
+            gyro: initChart('gyroChart', 'X', '#00ff9d', -200, 200)
+        };
+        
+        // Add extra datasets for Accel/Gyro
+        ['#ff2a6d', '#ffe600'].forEach((c, i) => {
+            charts.accel.data.datasets.push({ label: i===0?'Y':'Z', data: [], borderColor: c, borderWidth: 1, pointRadius:0 });
+            charts.gyro.data.datasets.push({ label: i===0?'Y':'Z', data: [], borderColor: c, borderWidth: 1, pointRadius:0 });
+        });
+
+        // --- Logic & State ---
+        let mqttClient;
+        let isHost = false;
+        let targetPitch = 0, targetRoll = 0, targetYaw = 0;
+        let filterPitch = 0, filterRoll = 0;
+        const dt = 0.05, alpha = 0.95;
+
+        // 1. MQTT Connection (Viewer Mode)
+        mqttClient = mqtt.connect(MQTT_BROKER);
+        mqttClient.on('connect', () => {
+            mqttBadge.innerText = "CLOUD: ONLINE";
+            mqttBadge.classList.add('active');
+            if (!isHost) {
+                mqttClient.subscribe(MQTT_TOPIC);
+                roleBadge.innerText = "VIEWER MODE";
+            }
+        });
+        
+        mqttClient.on('message', (topic, msg) => {
+            if (!isHost) processData(JSON.parse(msg.toString()));
+        });
+
+        // 2. Bluetooth Connection (Host Mode)
+        connectBtn.addEventListener('click', async () => {
+            try {
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'Feather Sense Data' }],
+                    optionalServices: [SERVICE_UUID]
+                });
+
+                statusBadge.innerText = "CONNECTING...";
+                
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                const characteristic = await service.getCharacteristic(CHAR_UUID);
+                
+                // Read once to trigger MTU negotiation
+                try { await characteristic.readValue(); } catch(e){}
+
+                await characteristic.startNotifications();
+                characteristic.addEventListener('characteristicvaluechanged', (e) => {
+                    const dataObj = parseBLE(e.target.value);
+                    processData(dataObj);
+                    // Broadcast
+                    if(mqttClient.connected) mqttClient.publish(MQTT_TOPIC, JSON.stringify(dataObj));
+                });
+
+                // UI Update
+                isHost = true;
+                connectBtn.innerHTML = "📡 BROADCASTING...";
+                connectBtn.style.background = "#333";
+                connectBtn.disabled = true;
+                statusBadge.innerText = "DEVICE CONNECTED";
+                statusBadge.classList.add('active');
+                roleBadge.innerText = "HOST MODE";
+                roleBadge.classList.add('host');
+                if(mqttClient) mqttClient.unsubscribe(MQTT_TOPIC);
+
+                device.addEventListener('gattserverdisconnected', () => {
+                    alert("Device Disconnected");
+                    location.reload();
+                });
+
+            } catch (err) {
+                console.error(err);
+                alert("Connection failed: " + err);
+            }
+        });
+
+        // Helper: Parse Raw Bytes
+        function parseBLE(value) {
+            const pressure = value.getFloat32(0, true);
+            const hr = value.getUint8(4, true);
+            const spo2 = value.getUint8(5, true);
+            const ax = value.getInt8(6)/8.0, ay = value.getInt8(7)/8.0, az = value.getInt8(8)/8.0;
+            const gx = value.getInt8(9)*2.0, gy = value.getInt8(10)*2.0, gz = value.getInt8(11)*2.0;
+            return { pressure, hr, spo2, ax, ay, az, gx, gy, gz };
+        }
+
+        // Helper: Update UI
+        function processData(d) {
+            const now = new Date().toLocaleTimeString();
+            
+            // Sensor Fusion (Complementary Filter)
+            const accPitch = Math.atan2(d.ay, d.az);
+            const accRoll = Math.atan2(-d.ax, Math.sqrt(d.ay*d.ay + d.az*d.az));
+            
+            filterPitch = alpha * (filterPitch + d.gy * (Math.PI/180) * dt) + (1-alpha) * accPitch;
+            filterRoll = alpha * (filterRoll + d.gx * (Math.PI/180) * dt) + (1-alpha) * accRoll;
+            
+            targetPitch = filterPitch;
+            targetRoll = filterRoll;
+            targetYaw += d.gz * (Math.PI/180) * dt;
+
+            // Update DOM Stats
+            document.getElementById('pitchVal').innerText = (filterPitch * (180/Math.PI)).toFixed(1);
+            document.getElementById('rollVal').innerText = (filterRoll * (180/Math.PI)).toFixed(1);
+            const g = Math.sqrt(d.ax**2 + d.ay**2 + d.az**2) / 9.8;
+            document.getElementById('gForceVal').innerText = g.toFixed(2);
+
+            // Update Charts
+            updateGraph(charts.bio, now, [d.hr]); // Add SPO2 logic if needed
+            updateGraph(charts.pressure, now, [d.pressure]);
+            updateGraph(charts.accel, now, [d.ax, d.ay, d.az]);
+            updateGraph(charts.gyro, now, [d.gx, d.gy, d.gz]);
+        }
+
+        function updateGraph(chart, label, dataArray) {
+            if (chart.data.labels.length > MAX_POINTS) {
+                chart.data.labels.shift();
+                chart.data.datasets.forEach(ds => ds.data.shift());
+            }
+            chart.data.labels.push(label);
+            dataArray.forEach((v, i) => { if(chart.data.datasets[i]) chart.data.datasets[i].data.push(v); });
+            chart.update();
+        }
+    </script>
+</body>
+</html>
