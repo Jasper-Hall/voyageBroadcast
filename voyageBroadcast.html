@@ -278,13 +278,18 @@
             const hasBluetooth = navigator.bluetooth !== undefined;
 
             if (!hasBluetooth || !isSecure) {
-                connectBtn.style.display = 'none'; // Hide button
-                browserError.style.display = 'block'; // Show Error
-                
-                let msg = "⚠️ <b>SYSTEM ERROR:</b><br>";
-                if (!hasBluetooth) msg += "• Browser does not support Web Bluetooth (Try Chrome/Edge/Bluefy).<br>";
-                if (!isSecure) msg += "• Connection is not secure (Must use HTTPS or Localhost).<br>";
-                browserError.innerHTML = msg;
+                if (connectBtn) connectBtn.style.display = 'none'; // Hide button
+                if (browserError) {
+                    browserError.style.display = 'block'; // Show Error
+                    let msg = "⚠️ <b>SYSTEM ERROR:</b><br>";
+                    if (!hasBluetooth) msg += "• Browser does not support Web Bluetooth (Try Chrome/Edge/Bluefy).<br>";
+                    if (!isSecure) msg += "• Connection is not secure (Must use HTTPS or Localhost).<br>";
+                    browserError.innerHTML = msg;
+                }
+            } else {
+                // Ensure button is visible if requirements are met
+                if (connectBtn) connectBtn.style.display = 'flex';
+                if (browserError) browserError.style.display = 'none';
             }
         }
         checkSystemRequirements();
@@ -329,7 +334,7 @@
 
         // Visor (Front)
         const visorGeo = new THREE.BoxGeometry(1.4, 0.4, 0.5);
-        const visorMat = new THREE.MeshPhongMaterial({ color: 0x000000, speculer: 0xffffff });
+        const visorMat = new THREE.MeshPhongMaterial({ color: 0x000000, specular: 0xffffff });
         const visor = new THREE.Mesh(visorGeo, visorMat);
         visor.position.set(0, 0.1, 1);
         headGroup.add(visor);
@@ -344,6 +349,11 @@
 
         scene.add(headGroup);
         camera.position.z = 6;
+
+        // --- Logic & State (Declared before animate function) ---
+        let targetPitch = 0, targetRoll = 0, targetYaw = 0;
+        let filterPitch = 0, filterRoll = 0;
+        const dt = 0.05, alpha = 0.95;
 
         function animate() {
             requestAnimationFrame(animate);
@@ -403,9 +413,6 @@
         // --- Logic & State ---
         let mqttClient;
         let isHost = false;
-        let targetPitch = 0, targetRoll = 0, targetYaw = 0;
-        let filterPitch = 0, filterRoll = 0;
-        const dt = 0.05, alpha = 0.95;
 
         // 1. MQTT Connection (Viewer Mode)
         mqttClient = mqtt.connect(MQTT_BROKER);
@@ -475,7 +482,7 @@
             const hr = value.getUint8(4, true);
             const spo2 = value.getUint8(5, true);
             const ax = value.getInt8(6)/8.0, ay = value.getInt8(7)/8.0, az = value.getInt8(8)/8.0;
-            const gx = value.getInt8(9)*2.0, gy = value.getInt8(10)*2.0, gz = value.getInt8(11)*2.0;
+            const gx = value.getInt8(9)/2.0, gy = value.getInt8(10)/2.0, gz = value.getInt8(11)/2.0;
             return { pressure, hr, spo2, ax, ay, az, gx, gy, gz };
         }
 
