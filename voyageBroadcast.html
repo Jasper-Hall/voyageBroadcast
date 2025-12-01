@@ -729,26 +729,32 @@
         }
 
         // Force reset system with "!" key - emergency reset button
+        // This is intentionally very simple and bypasses mode/host checks so it ALWAYS brings the button back.
         document.addEventListener('keydown', (e) => {
-            if (e.key === '!' || (e.shiftKey && e.key === '1')) {
+            // On most keyboards "!" is Shift+1. Some browsers report "!" as the key, others report "1" with shift.
+            if (e.key === '!' || (e.shiftKey && e.code === 'Digit1')) {
                 const btn = document.getElementById('connectBtn');
-                const isSecure = window.isSecureContext;
-                const hasBluetooth = navigator.bluetooth !== undefined;
-                const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-                
+
                 // Clear all timers
-                if (watchdogTimer) clearTimeout(watchdogTimer);
-                if (dataTimeout) clearTimeout(dataTimeout);
-                
-                // Force reset state
+                if (typeof watchdogTimer !== 'undefined' && watchdogTimer) clearTimeout(watchdogTimer);
+                if (typeof dataTimeout !== 'undefined' && dataTimeout) clearTimeout(dataTimeout);
+
+                // Fully reset viewer/host state
                 hostActive = false;
-                
-                // Force show button if Bluetooth is available (desktop only)
-                if (btn && hasBluetooth && isSecure && !isMobile) {
+                isHost = false;
+
+                if (btn) {
+                    // Re-enable and show the button no matter what
+                    btn.disabled = false;
                     btn.style.display = 'flex';
-                    browserError.style.display = 'none';
-                    console.log('System reset: Connect button forced visible');
+                    btn.innerHTML = '<span style="font-size: 1.2em">📡</span> CONNECT DEVICE (HOST)';
                 }
+
+                if (typeof browserError !== 'undefined' && browserError) {
+                    browserError.style.display = 'none';
+                }
+
+                console.log('System reset via "!" key: connect button forced visible');
             }
         });
     </script>
