@@ -491,6 +491,11 @@
             mqttBadge.innerText = "CLOUD: ONLINE";
             mqttBadge.classList.add('active');
             if (!isHost) {
+                // FLUSH GHOST DATA: Clear any retained messages by publishing empty retained messages
+                // This clears the retained messages from the broker
+                mqttClient.publish(MQTT_TOPIC, '', { retain: true, qos: 1 });
+                mqttClient.publish(MQTT_STATUS_TOPIC, '', { retain: true, qos: 1 });
+                
                 // Subscribe to both data and status topics
                 mqttClient.subscribe(MQTT_TOPIC);
                 mqttClient.subscribe(MQTT_STATUS_TOPIC, (err) => {
@@ -513,6 +518,12 @@
         mqttClient.on('message', (topic, msg) => {
             if (isHost) return; // Ignore own messages
 
+            // Ignore empty messages (used to clear retention)
+            const msgStr = msg.toString();
+            if (!msgStr || msgStr.trim() === '') {
+                return;
+            }
+
             // --- Watchdog Logic Start ---
             const btn = document.getElementById('connectBtn');
             
@@ -531,7 +542,7 @@
             // --- Watchdog Logic End ---
 
             try {
-                processData(JSON.parse(msg.toString()));
+                processData(JSON.parse(msgStr));
             } catch(e) {}
         });
         
