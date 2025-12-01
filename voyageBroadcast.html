@@ -277,9 +277,10 @@
         const browserError = document.getElementById('browserError');
 
         function checkSystemRequirements() {
-            // Don't show error initially - we're in viewer mode by default
-            // Error will only show if user tries to become host and can't
-            connectBtn.style.display = 'none';
+            // EMERGENCY SIMPLIFICATION:
+            // Always show the connect button. We rely on the browser itself to block
+            // unsupported Bluetooth calls, rather than hiding the UI.
+            connectBtn.style.display = 'flex';
             browserError.style.display = 'none';
         }
         checkSystemRequirements();
@@ -524,67 +525,31 @@
                 return;
             }
 
-            // --- Watchdog Logic Start ---
-            const btn = document.getElementById('connectBtn');
-            
-            // 1. Hide button temporarily when data arrives
-            if (btn && window.isSecureContext && navigator.bluetooth) {
-                btn.style.display = 'none';
-            }
-            // 2. Clear previous timer
-            clearTimeout(watchdogTimer);
-            // 3. Set new timer: If no data for 3 seconds, show button again
-            watchdogTimer = setTimeout(() => {
-                if (!isHost && btn && window.isSecureContext && navigator.bluetooth) {
-                    btn.style.display = 'flex';
-                }
-            }, 3000);
-            // --- Watchdog Logic End ---
-
+            // EMERGENCY CHANGE:
+            // Do NOT hide or change the connect button here. Only process data.
             try {
                 processData(JSON.parse(msgStr));
             } catch(e) {}
         });
         
         // Function to show/hide connect button based on host status
+        // EMERGENCY SIMPLIFICATION:
+        // For presentation reliability, this no longer hides the button at all.
+        // It only ensures the button text/role is correct when we know host status.
         function updateConnectButtonVisibility() {
             if (isHost) {
-                // Host always hides the button (it's already disabled)
+                // Already acting as host; button text is handled elsewhere.
                 return;
             }
-            
+
+            const btn = document.getElementById('connectBtn');
+            if (!btn) return;
+
+            // Always keep the button visible; just adjust label if we know a host is active.
             if (hostActive) {
-                // Host is active, hide button and error for viewers (viewer mode)
-                connectBtn.style.display = 'none';
-                if (browserError) browserError.style.display = 'none';
+                btn.innerHTML = '<span style=\"font-size: 1.2em\">📡</span> HOST ACTIVE (VIEWER)';
             } else {
-                // No host active, show button if browser supports it
-                const isSecure = window.isSecureContext;
-                const hasBluetooth = navigator.bluetooth !== undefined;
-                if (hasBluetooth && isSecure) {
-                    connectBtn.style.display = 'flex';
-                    if (browserError) browserError.style.display = 'none';
-                } else {
-                    // No host active but can't connect - only show error if user might want to be host
-                    // For mobile viewers, we'll keep it hidden since they're just viewing
-                    // Only show error if we're not on mobile (detected by checking if it's a mobile device)
-                    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-                    if (!isMobile) {
-                        // Desktop user might want to be host, show error
-                        connectBtn.style.display = 'none';
-                        if (browserError) {
-                            browserError.style.display = 'block';
-                            let msg = "⚠️ <b>SYSTEM ERROR:</b><br>";
-                            if (!hasBluetooth) msg += "• Browser does not support Web Bluetooth (Try Chrome/Edge/Bluefy).<br>";
-                            if (!isSecure) msg += "• Connection is not secure (Must use HTTPS or Localhost).<br>";
-                            browserError.innerHTML = msg;
-                        }
-                    } else {
-                        // Mobile device - hide error since they're just viewing
-                        connectBtn.style.display = 'none';
-                        if (browserError) browserError.style.display = 'none';
-                    }
-                }
+                btn.innerHTML = '<span style=\"font-size: 1.2em\">📡</span> CONNECT DEVICE (HOST)';
             }
         }
 
