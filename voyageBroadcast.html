@@ -73,7 +73,10 @@
             cursor: pointer;
             box-shadow: 0 0 15px rgba(0, 242, 255, 0.4);
             transition: all 0.2s;
-            display: flex; /* Hidden by default if not supported */
+            /* EMERGENCY: force visible no matter what JS does */
+            display: flex !important;
+            visibility: visible !important;
+            opacity: 1 !important;
             align-items: center;
             gap: 10px;
         }
