@@ -277,10 +277,32 @@
         const browserError = document.getElementById('browserError');
 
         function checkSystemRequirements() {
-            // Don't show error initially - we're in viewer mode by default
-            // Error will only show if user tries to become host and can't
-            connectBtn.style.display = 'none';
-            browserError.style.display = 'none';
+            // Check if browser supports Bluetooth
+            const isSecure = window.isSecureContext;
+            const hasBluetooth = navigator.bluetooth !== undefined;
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            
+            if (hasBluetooth && isSecure) {
+                // Show button by default on desktop (will be hidden if host is detected)
+                if (!isMobile) {
+                    connectBtn.style.display = 'flex';
+                } else {
+                    connectBtn.style.display = 'none';
+                }
+                browserError.style.display = 'none';
+            } else {
+                // No Bluetooth support - hide button and show error only on desktop
+                connectBtn.style.display = 'none';
+                if (!isMobile) {
+                    browserError.style.display = 'block';
+                    let msg = "⚠️ <b>SYSTEM ERROR:</b><br>";
+                    if (!hasBluetooth) msg += "• Browser does not support Web Bluetooth (Try Chrome/Edge/Bluefy).<br>";
+                    if (!isSecure) msg += "• Connection is not secure (Must use HTTPS or Localhost).<br>";
+                    browserError.innerHTML = msg;
+                } else {
+                    browserError.style.display = 'none';
+                }
+            }
         }
         checkSystemRequirements();
 
@@ -498,14 +520,17 @@
                         // The broker will send the last retained message if one exists
                         // This happens automatically, but we can also request it
                         setTimeout(() => {
-                            // If no status received after 1 second, assume no host
-                            if (!hostActive) {
-                                updateConnectButtonVisibility();
-                            }
+                            // Update button visibility after checking for host status
+                            updateConnectButtonVisibility();
                         }, 1000);
+                    } else {
+                        // If subscription fails, still update button visibility
+                        updateConnectButtonVisibility();
                     }
                 });
                 roleBadge.innerText = "VIEWER MODE";
+                // Also update immediately in case MQTT is slow
+                updateConnectButtonVisibility();
             }
         });
         
@@ -559,17 +584,23 @@
                 connectBtn.style.display = 'none';
                 if (browserError) browserError.style.display = 'none';
             } else {
-                // No host active, show button if browser supports it
+                // No host active, show button if browser supports it (desktop only)
                 const isSecure = window.isSecureContext;
                 const hasBluetooth = navigator.bluetooth !== undefined;
+                const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+                
                 if (hasBluetooth && isSecure) {
-                    connectBtn.style.display = 'flex';
+                    // Show button on desktop, hide on mobile
+                    if (!isMobile) {
+                        connectBtn.style.display = 'flex';
+                    } else {
+                        connectBtn.style.display = 'none';
+                    }
                     if (browserError) browserError.style.display = 'none';
                 } else {
                     // No host active but can't connect - only show error if user might want to be host
                     // For mobile viewers, we'll keep it hidden since they're just viewing
                     // Only show error if we're not on mobile (detected by checking if it's a mobile device)
-                    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
                     if (!isMobile) {
                         // Desktop user might want to be host, show error
                         connectBtn.style.display = 'none';
