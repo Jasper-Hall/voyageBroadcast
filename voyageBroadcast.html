@@ -727,6 +727,30 @@
             dataArray.forEach((v, i) => { if(chart.data.datasets[i]) chart.data.datasets[i].data.push(v); });
             chart.update();
         }
+
+        // Force reset system with "!" key - emergency reset button
+        document.addEventListener('keydown', (e) => {
+            if (e.key === '!' || (e.shiftKey && e.key === '1')) {
+                const btn = document.getElementById('connectBtn');
+                const isSecure = window.isSecureContext;
+                const hasBluetooth = navigator.bluetooth !== undefined;
+                const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+                
+                // Clear all timers
+                if (watchdogTimer) clearTimeout(watchdogTimer);
+                if (dataTimeout) clearTimeout(dataTimeout);
+                
+                // Force reset state
+                hostActive = false;
+                
+                // Force show button if Bluetooth is available (desktop only)
+                if (btn && hasBluetooth && isSecure && !isMobile) {
+                    btn.style.display = 'flex';
+                    browserError.style.display = 'none';
+                    console.log('System reset: Connect button forced visible');
+                }
+            }
+        });
     </script>
 </body>
 </html>
