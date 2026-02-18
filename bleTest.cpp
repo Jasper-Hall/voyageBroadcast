@@ -39,6 +39,9 @@ struct __attribute__((packed)) Packet {
 
 Packet dataPacket;
 
+// --- Audio Pin Definition ---
+#define AUDIO_PIN A0
+
 // --- Sensor Objects ---
 #define I2C_ADDRESS    0x57
 DFRobot_BloodOxygen_S_I2C MAX30102(&Wire ,I2C_ADDRESS);
@@ -62,6 +65,19 @@ volatile int samplesRead;
 
 void setup() {
   Serial.begin(115200);
+  
+  // --- Audio Output Setup ---
+  pinMode(AUDIO_PIN, OUTPUT);
+  
+  // Sweep from 300Hz to 1000Hz to find resonance
+  Serial.println("Audio Test: Sweeping frequencies...");
+  for (int i = 300; i <= 1000; i += 100) {
+     tone(AUDIO_PIN, i);
+     Serial.print("Freq: "); Serial.println(i);
+     delay(500); // Play each tone for 0.5s
+  }
+  tone(AUDIO_PIN, 400); // Settle on 400Hz (stronger for BCE-1)
+  Serial.println("Holding at 400Hz");
   
   // 1. Setup Sensors first
   setupSensors();

@@ -494,11 +494,18 @@
         let mqttClient;
         let isHost = false;
         let hostActive = false;
+        let device = null;  // Track BLE device for disconnect
         let dataTimeout = null;
         const DATA_TIMEOUT_MS = 5000; // 5 seconds without data = host offline
 
         // 1. MQTT Connection (Viewer Mode)
-        mqttClient = mqtt.connect(MQTT_BROKER);
+        // Generate unique client ID and force clean session
+        const CLIENT_ID = 'NeuroMotion_' + Math.random().toString(16).substr(2, 8);
+        mqttClient = mqtt.connect(MQTT_BROKER, {
+            clientId: CLIENT_ID,
+            clean: true,
+            reconnectPeriod: 5000
+        });
         mqttClient.on('connect', () => {
             mqttBadge.innerText = "CLOUD: ONLINE";
             mqttBadge.classList.add('active');
@@ -584,8 +591,35 @@
 
         // 2. Bluetooth Connection (Host Mode)
         connectBtn.addEventListener('click', async () => {
+
+            // If already hosting, disconnect
+            if (isHost && device && device.gatt.connected) {
+                // Send offline status
+                if (mqttClient && mqttClient.connected) {
+                    mqttClient.publish(MQTT_STATUS_TOPIC, JSON.stringify({
+                        type: 'host_offline',
+                        timestamp: Date.now()
+                    }), { qos: 1, retain: true });
+                }
+                // Disconnect BLE
+                device.gatt.disconnect();
+                // Reset UI
+                isHost = false;
+                connectBtn.innerHTML = "🔌 CONNECT TO FEATHER";
+                connectBtn.style.background = "";
+                connectBtn.style.boxShadow = "";
+                statusBadge.innerText = "DISCONNECTED";
+                statusBadge.classList.remove('active');
+                roleBadge.innerText = "VIEWER MODE";
+                roleBadge.classList.remove('host');
+                // Clear data display
+                updateDisplay({ hr: 0, spo2: 0, ax: 0, ay: 0, az: 0, gx: 0, gy: 0, gz: 0, pressure: 0 });
+                return;
+            }
+
+            // Otherwise, connect
             try {
-                const device = await navigator.bluetooth.requestDevice({
+                device = await navigator.bluetooth.requestDevice({
                     filters: [{ name: 'Feather Sense Data' }],
                     optionalServices: [SERVICE_UUID]
                 });
@@ -609,9 +643,10 @@
 
                 // UI Update
                 isHost = true;
-                connectBtn.innerHTML = "📡 BROADCASTING...";
-                connectBtn.style.background = "#333";
-                connectBtn.disabled = true;
+                connectBtn.innerHTML = "⏹ END BROADCAST";
+                connectBtn.style.background = "#ff2a6d";
+                connectBtn.style.boxShadow = "0 0 15px rgba(255, 42, 109, 0.4)";
+                connectBtn.disabled = false;
                 statusBadge.innerText = "DEVICE CONNECTED";
                 statusBadge.classList.add('active');
                 roleBadge.innerText = "HOST MODE";
